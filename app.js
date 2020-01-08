@@ -1,0 +1,153 @@
+const express = require("express");
+const path = require("path");
+const cookieParser = require("cookie-parser");
+const bodyParser = require("body-parser");
+const fs = require("fs");
+const app = express();
+const http = require("http");
+const appConfig = require("./config/appConfig")
+const logger = require("./app/libs/loggerLib")
+const routeLoggerModule = require("./app/middlewares/routeLogger")
+const globalErrorModule = require("./app/middlewares/appErrorHandler")
+const mongoose = require("mongoose");
+const morgan = require("morgan");
+app.use(morgan("dev"))
+app.use(bodyParser.json())
+app.use(bodyParser.urlencoded({ extended : false }));
+app.use(cookieParser()) 
+//app.use(express.static(path.join(__dirname,"public")));
+app.use(routeLoggerModule.logIp)
+app.use(globalErrorModule.globalErrorHandler)
+app.use(express.static(path.join(__dirname, 'client')));
+
+const modelsPath = "./app/models"
+const controllerPath = "./app/controllers"
+const libsPath = "./app/libs"
+const middlewaresPath = "./app/middlewares"
+const routesPath = "./app/routes"
+
+app.all('*', function(req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE')
+    next();
+});
+
+
+//Bootstrap models
+fs.readdirSync(modelsPath).forEach(function (file) {
+  console.log(file)
+  if (~file.indexOf('.js')) require(modelsPath + '/' + file)
+});
+  // end Bootstrap models
+  
+  // Bootstrap route
+fs.readdirSync(routesPath).forEach(function (file) {
+  if (~file.indexOf('.js')) {
+    console.log(file)
+    let route = require(routesPath + '/' + file);
+    route.setRouter(app);
+    console.log("routes are set")
+  }
+});
+
+app._router.stack.forEach(function(r){
+  if (r.route && r.route.path){
+    console.log(r.route.path)
+  }
+})
+  // end bootstrap route
+  
+  // calling global 404 handler after route
+app.use(globalErrorModule.globalNotFoundHandler);
+  
+  // end global 404 handler
+
+  //create http server
+
+
+const server = http.createServer(app)
+console.log(appConfig)
+console.log("http server created")
+server.listen(appConfig.port)
+server.on("error",onError);
+server.on("listening",onListening);
+
+//  socket io connection handler
+const socketLib = require("./app/libs/socketLib")
+const socketServer = socketLib.setServer(server);
+
+// end connection handler
+
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+    if (error.syscall !== 'listen') {
+      logger.error(error.code + ' not equal listen', 'serverOnErrorHandler', 10)
+      throw error;
+    }
+    // handle specific listen errors with friendly messages
+    switch (error.code) {
+      case 'EACCES':
+        logger.error(error.code + ':elavated privileges required', 'serverOnErrorHandler', 10);
+        process.exit(1);
+        break;
+      case 'EADDRINUSE':
+        logger.error(error.code + ':port is already in use.', 'serverOnErrorHandler', 10);
+        process.exit(1);
+        break;
+      default:
+        logger.error(error.code + ':some unknown error occured', 'serverOnErrorHandler', 10);
+        throw error;
+    }
+  }
+  
+  /**
+   * Event listener for HTTP server "listening" event.
+   */
+  
+function onListening() {
+    var addr = server.address();
+    var bind = typeof addr === 'string'
+        ? 'pipe ' + addr
+        : 'port ' + addr.port;
+    ('Listening on ' + bind);
+    logger.info('server listening on port' + addr.port, 'serverOnListeningHandler', 10);
+    let db = mongoose.connect(appConfig.db.uri,{useNewUrlParser:true,useUnifiedTopology:true}); // ,{ useMongoClient: true }
+    }
+
+process.on('unhandledRejection', (reason, p) => {
+    console.log('Unhandled Rejection at: Promise', p, 'reason:', reason);
+    // application specific logging, throwing an error, or other logic here
+});
+
+
+// database connection settings
+
+mongoose.connection.on('error',function(err) {
+    console.log("database connection error");
+    console.log(err);
+    logger.error(err,"mongoose connection open handler",10)
+})
+
+
+mongoose.connection.on('open',function(err) {
+    if(err){
+    console.log("database connection error");
+    console.log(err);
+    logger.error(err,"mongoose connection open handler",10)
+    }
+    else {
+        console.log("database connection open success");
+        logger.info("database connection open",
+          'database connection open handler', 10)
+    }
+})
+
+
+//module.exports = app;
+
+  
